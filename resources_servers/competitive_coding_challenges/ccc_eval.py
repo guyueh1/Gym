@@ -179,7 +179,7 @@ def _exec_sync(tls: threading.local, sandbox: LocalSandbox, cmd: str, *, languag
     return loop.run_until_complete(sandbox.execute_code(cmd, language=language, timeout=timeout))[0]
 
 
-# Anything with LocalSandbox's async execute_code(); sandbox_runner.py supplies a local-process one.
+# Anything with LocalSandbox's async execute_code(); sandbox/sandbox_runner.py supplies a local-process one.
 SandboxFactory = Callable[[], LocalSandbox]
 
 
