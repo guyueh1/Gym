@@ -46,6 +46,7 @@ from nemo_gym.base_responses_api_agent import (
 )
 from nemo_gym.config_types import ModelServerRef, ResourcesServerRef
 from nemo_gym.global_config import get_global_config_dict
+from nemo_gym.model_sampling import ModelCallSampling
 from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
     NeMoGymFunctionCallOutput,
@@ -624,7 +625,9 @@ class HermesAgent(SimpleResponsesAPIAgent):
             "model": self._model_name(),
             # The sandbox reaches the Model Server directly; the rollout prefix keeps its calls correlated.
             "model_base_url": self.resolve_model_base_url(
-                self.config.model_server.name, state.request.episode_id.capture_key
+                self.config.model_server.name,
+                state.request.episode_id.capture_key,
+                sampling=ModelCallSampling.from_request(body),
             ),
             "terminal_timeout": self.config.terminal_timeout,
         }
@@ -705,13 +708,8 @@ class HermesAgent(SimpleResponsesAPIAgent):
         """Validate once at the HTTP boundary, identically for host and sandbox execution."""
         if body.model is not None and body.model != self._model_name():
             raise HTTPException(422, "Hermes request model must match the configured model")
-        if body.max_output_tokens is not None:
-            raise HTTPException(
-                422,
-                "Hermes does not support the total max_output_tokens budget; "
-                "configure max_tokens for a per-model-call limit instead",
-            )
-        supported = {"input", "instructions", "temperature", "model"}
+        ModelCallSampling.from_request(body)
+        supported = {"input", "instructions", "temperature", "top_p", "max_output_tokens", "model"}
         # Fail closed for new schema fields instead of silently accepting unimplemented controls.
         for name, field in type(body).model_fields.items():
             if name in supported:
@@ -757,7 +755,7 @@ class HermesAgent(SimpleResponsesAPIAgent):
             )
             or None,
             "temperature": body.temperature if body.temperature is not None else self.config.temperature,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": body.max_output_tokens if body.max_output_tokens is not None else self.config.max_tokens,
         }
 
     def _response_from_result(
@@ -870,7 +868,9 @@ class HermesAgent(SimpleResponsesAPIAgent):
             LOG.warning("Hermes host execution does not bound the run by %s", AGENT_TIMEOUT_METADATA_KEY)
         params = self._conversation_params(body)
 
-        base_url = self.resolve_model_base_url(self.config.model_server.name, rollout_id)
+        base_url = self.resolve_model_base_url(
+            self.config.model_server.name, rollout_id, sampling=ModelCallSampling.from_request(body)
+        )
         model_name = self._model_name()
 
         agent = AIAgent(

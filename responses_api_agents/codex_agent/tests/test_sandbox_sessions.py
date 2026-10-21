@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import base64
 import json
 import os
 import shlex
@@ -559,10 +560,7 @@ def test_advisories_remain_visible_on_completion_or_gradable_limits(setup, condi
 @pytest.mark.parametrize(
     "override",
     [
-        {"max_output_tokens": 123},
-        {"temperature": 0.2},
         {"seed": 42},
-        {"top_p": 0.9},
         {"tools": [{"type": "function", "name": "foo"}]},
         {"input": [{"role": "assistant", "content": "old turn"}]},
     ],
@@ -582,7 +580,7 @@ def test_rejected_request_does_not_consume_activation(setup):
     with TestClient(agent.setup_webserver()) as client:
         client.post("/v1/agent_sessions", json=seed().model_dump(mode="json")).raise_for_status()
         path = "/ng-rollout/codex-smoke-a2/v1/responses"
-        assert client.post(path, json={"input": "task", "temperature": 0.2}).status_code == 422
+        assert client.post(path, json={"input": "task", "temperature": -1}).status_code == 422
         sandbox.launch.assert_not_awaited()
         accepted = client.post(path, json={"input": "task"})
         assert accepted.status_code == 200, accepted.text
@@ -1052,7 +1050,6 @@ async def test_local_runtime_is_lazy_once_and_retries_failed_setup(setup):
         ("prompt_cache_key", "key"),
         ("max_tool_calls", 2),
         ("reasoning", {"effort": "high"}),
-        ("top_p", 0.9),
     ],
 )
 def test_model_boundary_options_are_rejected_before_activation(setup, field, value):
@@ -1979,3 +1976,33 @@ def test_task_timeout_metadata_reaches_sandbox_supervisor(
         assert response.json()["metadata"]["agent_timeout_sec"] == str(float(expected))
         closed = client.post("/v1/agent_sessions/close", json=close_body(session_id))
         assert closed.status_code == 200, closed.text
+
+
+@pytest.mark.parametrize("temperature", [0.0, 0.7])
+def test_session_sampling_reaches_model_route_and_preserves_retry_binding(setup, temperature):
+    agent, sandbox = setup
+    original_config = agent.config.model_dump()
+    controls = {"temperature": temperature, "top_p": 0.9, "max_output_tokens": 128}
+    body = {"input": "Fix the code", **controls}
+    with TestClient(agent.setup_webserver()) as client:
+        client.post("/v1/agent_sessions", json=seed().model_dump(mode="json")).raise_for_status()
+        path = "/ng-rollout/codex-smoke-a2/v1/responses"
+        result = client.post(path, json=body)
+        assert result.status_code == 200, result.text
+        config = tomllib.loads(sandbox.files[f"{sandbox.directory}/home/.codex/config.toml"])
+        base_url = config["model_providers"]["gym"]["base_url"]
+        encoded = base_url.split("/ng-sampling/", 1)[1].split("/", 1)[0]
+        assert json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))) == controls
+        assert base_url.endswith(path.removesuffix("/responses"))
+        assert client.post(path, json=body).json() == result.json()
+        assert client.post(path, json={**body, "top_p": 0.8}).status_code == 409
+    sandbox.launch.assert_awaited_once()
+    assert agent.config.model_dump() == original_config
+
+
+def test_request_sampling_requires_gym_model_server(setup):
+    agent, sandbox = setup
+    agent.config.model_server = None
+    with pytest.raises(HTTPException, match="requires a Gym model_server"):
+        agent._sandbox_input(NeMoGymResponseCreateParamsNonStreaming(input="task", temperature=0))
+    sandbox.launch.assert_not_awaited()
