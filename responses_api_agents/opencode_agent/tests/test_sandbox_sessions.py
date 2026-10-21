@@ -1410,3 +1410,22 @@ def test_task_timeout_does_not_allow_other_metadata_or_consume_activation(
         assert accepted.status_code == 200, accepted.text
         closed = client.post("/v1/agent_sessions/close", json=close_body(session_id))
         assert closed.status_code == 200, closed.text
+
+
+def test_explicit_native_model_and_runtime_paths_are_passed_to_the_harness(setup):
+    agent, sandbox = setup
+    agent.config.sandbox_model_id = "gpt-5.5"
+    agent.config.sandbox_python_executable = "/runtime/python/bin/python3"
+    agent.config.sandbox_path_prefix = ["/runtime/bin"]
+    agent.config.sandbox_executable_path = "/runtime/bin/opencode"
+    agent.config.sandbox_executable_sha256 = "1" * 64
+    with TestClient(agent.setup_webserver()) as client:
+        assert client.post("/v1/agent_sessions", json=seed().model_dump(mode="json")).status_code == 200
+        result = client.post("/ng-rollout/opencode-smoke-a2/v1/responses", json={"input": "Fix code"})
+        assert result.status_code == 200, result.text
+        payload = json.loads(sandbox.files[f"{sandbox.directory}/input.json"])
+        config = json.loads(payload["env"]["OPENCODE_CONFIG_CONTENT"])
+        assert config["model"] == config["small_model"] == "nemo_gym/gpt-5.5"
+        assert set(config["provider"]["nemo_gym"]["models"]) == {"gpt-5.5"}
+        assert config["provider"]["nemo_gym"]["models"]["gpt-5.5"]["reasoning"] is True
+        assert payload["path_prefix"] == ["/runtime/bin"]
