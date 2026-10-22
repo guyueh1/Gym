@@ -1,0 +1,50 @@
+# Eterna Replicase Round 1, as the challenge states it.
+#
+# The target already lives in rds/targets.py (REPLICASE_71_89) because every
+# constraint here is a property of the molecule, not of this file: 160 nt, the
+# constant template-binding prefix AGUCAUUG, at least two changes from the
+# 71-89 ribozyme, the five conserved positions, and an EternaFold folding
+# energy of -19 kcal/mol or higher so the design spends some of its time
+# unstructured.
+#
+# Ranked on RibonanzaNet-SS crossing-pair F1 against the 3D-derived structure:
+# the target is pseudoknotted, a thermodynamic engine cannot express that, and
+# the challenge names Rnet as what recent Eterna rounds used.
+name: replicase_round1
+category: pseudoknot_design
+source: Eterna Replicase Round 1
+provides:
+- secondary_structure
+- wild_type
+- sequence_constraints
+scoring:
+  primary: struct.rnet_ss.match.crossed_pair_f1
+  gates:
+    score.constraints.passed: true
+  top_k: 20
+  pass_threshold: 0.8
+budget:
+  candidates: 2000
+  rounds: 24
+  tool_calls: 80
+  gpu_seconds: 7200
+generator: generate.grnade
+exclude:
+- generate.inverse_fold
+- generate.mutate
+- fold.vienna
+targets:
+- name: eterna_replicase_round1
+  length: 160
+  origin: eterna_replicase
+  target_structure: "..........[[[[[.........[[[[[(.{.).(.(((((((((((....))))..((((.]]]]]))))((((((......]]]]].))))))))))))))...................(((((........(((.((...}.))))).))))).."
+  wild_type: "AGUCAUUGCCGCACCAAGACAAAUCUCCCCCCAGAGCCUGAGAACAUCCACGGAUGCAGAGGAGGGAGCCUUCGGUGGAUUAAUGGUGCACCACCGUUCUCAGCACGUACCCGAACGAAAAAGACCUGACAGAAAGGCGUUGUUAGACACGCACAGGUAC"
+  fixed_prefix: AGUCAUUG
+  min_changes_from_wt: 2
+  max_free_energy: -19.0
+  conserved:
+    34: G
+    37: C
+    60: A
+    107: G
+    108: U
